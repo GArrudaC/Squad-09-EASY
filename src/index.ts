@@ -72,8 +72,8 @@ async function connectwhatsapp(){
             sock.sendMessage(jid, {text: texto}, { quoted:msg })
         }
 
-        if (textmessage == "-Ola") {
-            await enviar("Testando", jid)
+        if (textmessage == "-TesteBot") {
+            await enviar("Olá eu sou o bot do Squad 09", jid)
         }
     })
 
