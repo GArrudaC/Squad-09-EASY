@@ -13,6 +13,13 @@ async function connectwhatsapp(){
         logger: pino({ level: "silent"})
     })
 
+    // ===================================================================
+    //      ARMAZENAMENTO DE ESTADO DO USUÁRIO
+    // ===================================================================
+    // Este Map vai guardar o "estágio" da conversa de cada usuário
+    // Ex: userState.set("id_do_usuario", "aguardando_opcao_menu")
+    const userState = new Map();
+
     /// teste de conexão
     sock.ev.on("connection.update", (update) => {
         const {connection, lastDisconnect} = update
@@ -38,6 +45,11 @@ async function connectwhatsapp(){
         if(!msg.message || msg.key.fromMe) return
 
         const jid = msg.key.remoteJid!
+
+        if (jid.endsWith('@g.us')) {
+            return // Ignora mensagens de grupo
+        }
+
         const nomeContato = msg.pushName || "Desconhecido" //pegar o nome que a pessoa cadastrou no zap
         const numero = jid.split("@")[0] // pegar o numero da msg
 
@@ -72,26 +84,67 @@ async function connectwhatsapp(){
             sock.sendMessage(jid, {text: texto}, { quoted:msg })
         }
 
-        switch (textmessage.toLowerCase()) { // .toLowerCase() ajuda a evitar erros de digitação
-            case "-testebot":
-                await enviar("Olá eu sou o bot do Squad 09", jid);
-                break; // Não se esqueçam do break
+        // 1. Defina seu menu
+        const menu = `👋 Olá, ${nomeContato}! Eu sou o atendente virtual do Squad 09.
+        \nAqui estão as opções disponíveis:
+        
+        \n*1.* Opção A (Ex: Ver produtos)\n*2.* Opção B (Ex: Falar com suporte)\n*3.* Opção C (Ex: Nossos horários)
+        
+        \nPor favor, envie o número da opção desejada.\nCaso deseje retornar ao menu principal digite "menu" a qualquer momento!`;
 
-            case "-hora":
-                await enviar(`A hora exata é: ${hora}`, jid);
-                break;
+        // 2. Normalize a mensagem
+        const msgUsuario = textmessage.toLowerCase().trim();
 
-            case "-menu":
-                await enviar("=== MENU ===\n-TesteBot\n-hora\n-menu\nbom dia", jid);
-                break;
+        // 3. Pegue o estado atual do usuário
+        const estadoAtual = userState.get(jid);
 
-            case "bom dia":
-                await enviar(`Bom dia, ${nomeContato}!`, jid);
-                break;
+        // 4. Crie uma "Saída de emergência" - se o usuário digitar "menu"
+        // ele sempre volta ao menu, não importa onde esteja.
+        if (msgUsuario === "menu") {
+            await enviar(menu, jid);
+            userState.set(jid, 'aguardando_opcao'); // Define o estado
+            return; // Encerra o processamento aqui
+        }
 
-            default:
-                // Opcional: fazer nada ou enviar uma mensagem de "comando não entendido"
-                // console.log("Comando não reconhecido:", textmessage);
+        // 5. Lógica Principal
+        if (estadoAtual === 'aguardando_opcao') {
+            // O usuário JÁ VIU o menu. Ele está respondendo. (REQUISITO 2)
+            
+            switch (msgUsuario) {
+                case "1":
+                    await enviar("Você escolheu a *Opção 1*!", jid);
+                    userState.delete(jid); // Limpa o estado (conversa concluída)
+                    break;
+                
+                case "2":
+                    await enviar("Você escolheu a *Opção 2*!", jid);
+                    userState.delete(jid); // Limpa o estado
+                    break;
+
+                case "3":
+                    await enviar("Você escolheu a *Opção 3*!", jid);
+                    userState.delete(jid); // Limpa o estado
+                    break;
+                
+                case "-testebot":
+                    await enviar("Testando...", jid);
+                    // Não mexe no estado, continua aguardando opção
+                    break;
+
+                default:
+                    // O usuário viu o menu, mas digitou algo inválido
+                    if (msgUsuario.startsWith("[")) { return; } // Ignora imagem/sticker
+                    
+                    await enviar("Opção inválida, tente novamente.", jid);
+                    // IMPORTANTE: Não limpamos o estado. Ele continua 'aguardando_opcao'.
+                    break;
+            }
+        } else {
+            
+            if (msgUsuario.startsWith("[")) { return; } // Ignora se a primeira msg for imagem
+            // Responde com o menu para QUALQUER coisa que ele disser
+            await enviar(menu, jid);
+            userState.set(jid, 'aguardando_opcao'); // Define o estado
         }
     })
 
