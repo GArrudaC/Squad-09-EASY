@@ -72,8 +72,26 @@ async function connectwhatsapp(){
             sock.sendMessage(jid, {text: texto}, { quoted:msg })
         }
 
-        if (textmessage == "-TesteBot") {
-            await enviar("Olá eu sou o bot do Squad 09", jid)
+        switch (textmessage.toLowerCase()) { // .toLowerCase() ajuda a evitar erros de digitação
+            case "-testebot":
+                await enviar("Olá eu sou o bot do Squad 09", jid);
+                break; // Não se esqueçam do break
+
+            case "-hora":
+                await enviar(`A hora exata é: ${hora}`, jid);
+                break;
+
+            case "-menu":
+                await enviar("=== MENU ===\n-TesteBot\n-hora\n-menu\nbom dia", jid);
+                break;
+
+            case "bom dia":
+                await enviar(`Bom dia, ${nomeContato}!`, jid);
+                break;
+
+            default:
+                // Opcional: fazer nada ou enviar uma mensagem de "comando não entendido"
+                // console.log("Comando não reconhecido:", textmessage);
         }
     })
 
