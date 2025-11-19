@@ -1,74 +1,92 @@
-export default async function fetchApi() {
-    const url1 = "https://app.omie.com.br/api/v1/financas/mf/";
-    const url2 = "https://app.omie.com.br/api/v1/geral/categorias/";
-    const appKey = "5614700718627";
-    const appSecret = "2ae8328ce879960d99ba83e7986805a3";
+import moment from "moment-timezone";
+import "dotenv/config"; // Importante: Carrega as variáveis do .env
 
-    const body1 = {
+// Verifica se as chaves foram carregadas
+const appKey = process.env.OMIE_APP_KEY;
+const appSecret = process.env.OMIE_APP_SECRET;
+
+if (!appKey || !appSecret) {
+    throw new Error("ERRO DE CONFIGURAÇÃO: Chaves da OMIE não encontradas no arquivo .env");
+}
+
+// Função renomeada para ser mais descritiva e exportada para uso no bot
+export async function buscarRelatorioOmie(dias: number, tipo: 'passado' | 'futuro') {
+    const urlMov = "https://app.omie.com.br/api/v1/financas/mf/";
+    const urlCat = "https://app.omie.com.br/api/v1/geral/categorias/";
+
+    // 1. Calcular Datas
+    const hoje = moment().tz("America/Sao_Paulo");
+    let dataInicial, dataFinal;
+
+    if (tipo === 'passado') {
+        dataFinal = hoje.format("DD/MM/YYYY");
+        dataInicial = hoje.clone().subtract(dias, 'days').format("DD/MM/YYYY");
+    } else {
+        dataInicial = hoje.format("DD/MM/YYYY");
+        dataFinal = hoje.clone().add(dias, 'days').format("DD/MM/YYYY");
+    }
+
+    // 2. Montar Corpo da Requisição (Usando as chaves seguras)
+    const bodyMov = {
         call: "ListarMovimentos",
         app_key: appKey,
         app_secret: appSecret,
-        param: [{ nPagina: 1, nRegPorPagina: 5 }] // Pode aumentar quantos registros quer
+        param: [{ 
+            nPagina: 1, 
+            nRegPorPagina: 20, 
+            dDtPagamentoDe: dataInicial, 
+            dDtPagamentoAte: dataFinal,
+            cExibirCategorias: "S" 
+        }] 
     };
 
-    const body2 = {
+    const bodyCat = {
         call: "ListarCategorias",
         app_key: appKey,
         app_secret: appSecret,
-        param: [{ pagina: 1, registros_por_pagina: 5 }]
+        param: [{ pagina: 1, registros_por_pagina: 500 }]
     };
 
     try {
+        // 3. Chamada Paralela
         const [resMov, resCat] = await Promise.all([
-            fetch(url1, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body1),
-            }),
-            fetch(url2, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body2),
-            }),
+            fetch(urlMov, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(bodyMov) }),
+            fetch(urlCat, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(bodyCat) }),
         ]);
 
-        if (!resMov.ok) throw new Error(`Erro HTTP Movimentos: ${resMov.status}`);
-        if (!resCat.ok) throw new Error(`Erro HTTP Categorias: ${resCat.status}`);
+        if (!resMov.ok || !resCat.ok) throw new Error("Erro na resposta da API Omie");
 
-        const [dadosMov, dadosCat] = await Promise.all([
-            resMov.json(),
-            resCat.json(),
-        ]);
+        const [dadosMov, dadosCat] = await Promise.all([resMov.json(), resCat.json()]);
 
-        // Filtrar e formatar movimentos
         // @ts-ignore
-        const movimentosFiltrados = dadosMov.movimentos.map(mov => ({
-            categoria: mov.detalhes.cCodCateg,
-            grupo: mov.detalhes.cGrupo,
-            status: mov.detalhes.cStatus,
-            valorTitulo: mov.detalhes.nValorTitulo,
-            dataEmissao: mov.detalhes.dDtEmissao,
-            dataPagamento: mov.detalhes.dDtPagamento,
-            valorPago: mov.resumo.nValPago
-        }));
+        if (!dadosMov.movimentos || dadosMov.movimentos.length === 0) {
+            return `🚫 Nenhum movimento encontrado entre ${dataInicial} e ${dataFinal}.`;
+        }
 
-        // Filtrar e formatar categorias
+        // 4. Mapear Categorias
+        const mapaCategorias = new Map();
         // @ts-ignore
-        const categoriasFiltradas = dadosCat.categoria_cadastro.map(cat => ({
-            codigo: cat.codigo,
-            descricao: cat.descricao,
-            transferencia: cat.transferencia
-        }));
+        dadosCat.categoria_cadastro.forEach((cat: any) => mapaCategorias.set(cat.codigo, cat.descricao));
 
-        console.log("Movimentos filtrados:");
-        console.log(JSON.stringify(movimentosFiltrados, null, 2));
+        // 5. Formatar Resposta
+        let mensagem = `📊 *Relatório Financeiro (${tipo === 'passado' ? 'Últimos' : 'Próximos'} ${dias} dias)*\n\n`;
+        let total = 0;
 
-        console.log("\nCategorias filtradas:");
-        console.log(JSON.stringify(categoriasFiltradas, null, 2));
+        // @ts-ignore
+        dadosMov.movimentos.forEach((mov: any) => {
+            const valor = mov.resumo.nValPago || mov.detalhes.nValorTitulo;
+            const catNome = mapaCategorias.get(mov.detalhes.cCodCateg) || "Sem Categoria";
+            const data = mov.detalhes.dDtPagamento || mov.detalhes.dDtPrevisao;
+            
+            total += parseFloat(String(valor));
+            mensagem += `📅 ${data} | 💰 R$ ${valor.toFixed(2)}\n📂 ${catNome}\n────────────────\n`;
+        });
 
-    } catch (erro) {
-        console.error("Erro ao puxar a API:", erro);
+        mensagem += `\n✅ *Total:* R$ ${total.toFixed(2)}`;
+        return mensagem;
+
+    } catch (error) {
+        console.error("Erro API:", error);
+        return "❌ Erro ao consultar dados financeiros.";
     }
 }
-
-fetchApi();
