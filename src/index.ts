@@ -1,282 +1,280 @@
-import makeWASocket, {DisconnectReason, useMultiFileAuthState} from "@whiskeysockets/baileys";
+import makeWASocket, { DisconnectReason, useMultiFileAuthState } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import qrcode from "qrcode-terminal"
 import { pino } from "pino";
 import moment from "moment-timezone";
 
-/**
- * Função principal que inicializa e conecta o bot ao WhatsApp.
- */
+// ==============================================================================
+// CONFIGURAÇÕES E VARIÁVEIS GLOBAIS
+// ==============================================================================
+
+// Mapa de estados (memória do bot)
+// Definimos que a chave é string e o valor é string
+const userState = new Map<string, string>();
+
+// Textos dos Menus (Centralizados para facilitar edição)
+const getMenuPrincipal = (nome: string) => {
+    return `👋 Olá, ${nome}! Eu sou Zizy, a atendente virtual da Easy.
+
+Aqui estão nossos serviços disponíveis:
+
+*1.* Relatórios
+*2.* ----- Pensar -----
+*3.* Dúvidas sobre nossos serviços
+
+Por favor, envie o número da opção desejada.
+Caso deseje retornar ao menu principal digite "menu" a qualquer momento!`;
+};
+
+const subMenuRelatorios = `Você escolheu a opção 1, *Relatórios*.
+O que você deseja?
+
+*1.* Relatórios passados
+*2.* Relatórios futuros
+*3.* Definir período
+
+*0.* Voltar ao menu anterior`;
+
+const relatoriosPassados = `Você escolheu a opção 1.1, *Relatórios passados*.
+Selecione o período:
+
+*1.* 7 dias
+*2.* 15 dias
+*3.* 30 dias
+
+*0.* Voltar ao menu anterior`;
+
+const relatoriosFuturos = `Você escolheu a opção 2.1, *Relatórios futuros*.
+Selecione o período:
+
+*1.* 7 dias
+*2.* 15 dias
+*3.* 30 dias
+
+*0.* Voltar ao menu anterior`;
+
+const definirPeriodo = `Você escolheu a opção 3.1, *Definir período*.
+
+Por favor, digite a *DATA INICIAL*.
+Formato: dd/mm/aaaa (Ex: 01/10/2025)
+
+*0.* Voltar ao menu anterior`;
+
+
+// ==============================================================================
+// FUNÇÃO PRINCIPAL
+// ==============================================================================
+
 async function connectwhatsapp(){
-    // `useMultiFileAuthState` gerencia a autenticação e salva as credenciais em múltiplos arquivos.
-    // Isso permite que a sessão seja mantida mesmo após reiniciar o bot.
     const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
 
-    // Cria uma instância do socket do WhatsApp com as credenciais salvas e um logger silencioso.
     const sock = makeWASocket({
         printQRInTerminal : false,
         auth: state,
         logger: pino({ level: "silent"})
     })
 
-    /**
-     * `userState` é um Mapa que armazena o estado atual da conversa para cada usuário.
-     * A chave é o JID (ID do usuário) e o valor é uma string que representa o menu atual (ex: "menu_principal").
-     * Dados temporários, como a data inicial de um período, são salvos com um sufixo (ex: jid + "_data_inicial").
-     */
-    const userState = new Map<string, string>(); // Para estados simples
+    // --- Função de Envio (Auxiliar) ---
+    const enviar = async (texto: string, jid: string, quotedMsg: any) => {
+        await sock.sendMessage(jid, { text: texto }, { quoted: quotedMsg })
+    }
 
-    // --- Definição dos Textos dos Menus ---
-    const menuPrincipal = (nomeContato: string) => {
-        return `👋 Olá, ${nomeContato}! Eu sou Zizy, a atendente virtual da Easy.
+    // --- Lógica de Processamento de Mensagem (O CORAÇÃO DO BOT) ---
+    // Adicionadas as tipagens: string, string, string, any
+    async function processarMensagem(msgRaw: string, jid: string, nomeContato: string, quotedMsg: any) {
+        
+        const msg = msgRaw.toLowerCase().trim();
+        
+        // 1. Verificação de Estado Inicial
+        if (!userState.has(jid)) {
+            await enviar(getMenuPrincipal(nomeContato), jid, quotedMsg);
+            userState.set(jid, "menu_principal");
+            return;
+        }
 
-Aqui estão nossos serviços disponíveis:
+        let estadoAtual = userState.get(jid);
 
-1. Relatórios
-2. ----- Pensar -----
-3. Dúvidas sobre nossos serviços
+        // 2. Saída de Emergência Global
+        if (msg === "menu") {
+            await enviar(getMenuPrincipal(nomeContato), jid, quotedMsg);
+            userState.set(jid, "menu_principal");
+            userState.delete(jid + "_data_inicial");
+            return;
+        }
 
-Por favor, envie o número da opção desejada.
-Caso deseje retornar ao menu principal digite "menu" a qualquer momento!`;
-    };
+        // 3. Regex de Data
+        const regexData = /^\d{2}\/\d{2}\/\d{4}$/;
 
-    const subMenuRelatorios = `Você escolheu a opção 1, Relatórios.
-O que você deseja?
+        // 4. Máquina de Estados (Switch Case)
+        switch (estadoAtual) {
+            
+            // --- MENU PRINCIPAL ---
+            case "menu_principal":
+                if (["oi", "olá", "bom dia", "boa tarde", "boa noite"].includes(msg)) {
+                    await enviar(getMenuPrincipal(nomeContato), jid, quotedMsg);
+                    return;
+                }
 
-1. Relatórios passados
-2. Relatórios futuros
-3. Definir período
+                switch (msg) {
+                    case "1":
+                        await enviar(subMenuRelatorios, jid, quotedMsg);
+                        userState.set(jid, "relatorios");
+                        break;
+                    case "2":
+                        await enviar("🚧 Opção 2 em desenvolvimento.", jid, quotedMsg);
+                        break;
+                    case "3":
+                        await enviar("Escreva sua dúvida abaixo e um atendente irá responder em breve.", jid, quotedMsg);
+                        userState.set(jid, "duvidas_servicos");
+                        break;
+                    default:
+                        await enviar("❌ Opção inválida. Digite 1, 2 ou 3.", jid, quotedMsg);
+                        break;
+                }
+                break;
 
-0. Voltar ao menu anterior`;
+            // --- SUBMENU RELATÓRIOS ---
+            case "relatorios":
+                switch (msg) {
+                    case "1":
+                        await enviar(relatoriosPassados, jid, quotedMsg);
+                        userState.set(jid, "relatorios_passados");
+                        break;
+                    case "2":
+                        await enviar(relatoriosFuturos, jid, quotedMsg);
+                        userState.set(jid, "relatorios_futuros");
+                        break;
+                    case "3":
+                        await enviar(definirPeriodo, jid, quotedMsg);
+                        userState.set(jid, "definir_periodo_inicial");
+                        break;
+                    case "0":
+                        await enviar(getMenuPrincipal(nomeContato), jid, quotedMsg);
+                        userState.set(jid, "menu_principal");
+                        break;
+                    default:
+                        await enviar("❌ Opção inválida. Digite 1, 2, 3 ou 0 para voltar.", jid, quotedMsg);
+                        break;
+                }
+                break;
 
-    const relatoriosPassados = `Você escolheu a opção 1.1, Relatórios passados.
-O que você deseja?
+            // --- RELATÓRIOS PASSADOS ---
+            case "relatorios_passados":
+                if (["1", "2", "3"].includes(msg)) {
+                    const dias = msg === "1" ? 7 : msg === "2" ? 15 : 30;
+                    await enviar(`✅ Gerando relatório passado de ${dias} dias...`, jid, quotedMsg);
+                    // LOGICA DE BANCO DE DADOS ENTRARIA AQUI
+                    userState.set(jid, "menu_principal"); 
+                    await enviar(getMenuPrincipal(nomeContato), jid, quotedMsg);
+                } else if (msg === "0") {
+                    await enviar(subMenuRelatorios, jid, quotedMsg);
+                    userState.set(jid, "relatorios");
+                } else {
+                    await enviar("❌ Opção inválida.", jid, quotedMsg);
+                }
+                break;
 
-1. 7 dias
-2. 15 dias
-3. 30 dias
+            // --- RELATÓRIOS FUTUROS ---
+            case "relatorios_futuros":
+                if (["1", "2", "3"].includes(msg)) {
+                    const dias = msg === "1" ? 7 : msg === "2" ? 15 : 30;
+                    await enviar(`✅ Gerando relatório futuro de ${dias} dias...`, jid, quotedMsg);
+                    userState.set(jid, "menu_principal");
+                    await enviar(getMenuPrincipal(nomeContato), jid, quotedMsg);
+                } else if (msg === "0") {
+                    await enviar(subMenuRelatorios, jid, quotedMsg);
+                    userState.set(jid, "relatorios");
+                } else {
+                    await enviar("❌ Opção inválida.", jid, quotedMsg);
+                }
+                break;
 
-0. Voltar ao menu anterior`;
+            // --- DÚVIDAS ---
+            case "duvidas_servicos":
+                await enviar("✅ Recebemos sua dúvida! Em breve entraremos em contato.", jid, quotedMsg);
+                userState.set(jid, "menu_principal");
+                await enviar(getMenuPrincipal(nomeContato), jid, quotedMsg);
+                break;
 
-    const relatoriosFuturos = `Você escolheu a opção 2.1, Relatórios futuros.
-O que você deseja?
+            // --- DEFINIR DATA INICIAL ---
+            case "definir_periodo_inicial":
+                if (msg === "0") {
+                    userState.delete(jid + "_data_inicial");
+                    await enviar(subMenuRelatorios, jid, quotedMsg);
+                    userState.set(jid, "relatorios");
+                } else if (regexData.test(msg)) {
+                    userState.set(jid + "_data_inicial", msg);
+                    userState.set(jid, "definir_periodo_final");
+                    await enviar("Agora, digite a *DATA FINAL* (dd/mm/aaaa):", jid, quotedMsg);
+                } else {
+                    await enviar("⚠️ Formato inválido. Use dd/mm/aaaa (Ex: 01/10/2025).", jid, quotedMsg);
+                }
+                break;
 
-1. 7 dias
-2. 15 dias
-3. 30 dias
+            // --- DEFINIR DATA FINAL ---
+            case "definir_periodo_final":
+                if (msg === "0") {
+                    userState.delete(jid + "_data_inicial");
+                    await enviar(subMenuRelatorios, jid, quotedMsg);
+                    userState.set(jid, "relatorios");
+                } else if (regexData.test(msg)) {
+                    const dataInicial = userState.get(jid + "_data_inicial");
+                    userState.delete(jid + "_data_inicial");
+                    
+                    await enviar(`✅ Buscando dados de ${dataInicial} até ${msg}...`, jid, quotedMsg);
+                    // LOGICA DO BANCO DE DADOS AQUI
+                    
+                    userState.set(jid, "menu_principal");
+                    await enviar(getMenuPrincipal(nomeContato), jid, quotedMsg);
+                } else {
+                    await enviar("⚠️ Formato inválido. Use dd/mm/aaaa.", jid, quotedMsg);
+                }
+                break;
 
-0. Voltar ao menu anterior`;
+            default:
+                await enviar(getMenuPrincipal(nomeContato), jid, quotedMsg);
+                userState.set(jid, "menu_principal");
+                break;
+        }
+    }
 
-    const definirPeriodo = `Você escolheu a opção 3.1, Definir período.
 
-Qual a data inicial?
-Coloque no formato (dd/mm/aaaa)
-Qual a data final?
-Coloque no formato (dd/mm/aaaa)
+    // ==============================================================================
+    // LISTENERS
+    // ==============================================================================
 
-0. Voltar ao menu anterior`;
-
-    // --- Gerenciamento de Eventos do Socket ---
-
-    // Evento "connection.update": é acionado sempre que o estado da conexão muda.
     sock.ev.on("connection.update", (update) => {
-        // Extrai as informações relevantes do evento.
         const {connection, lastDisconnect, qr} = update
         if(connection == "close" && lastDisconnect) {
             const shouldreconnect = (lastDisconnect.error as Boom)?.output?.statusCode != DisconnectReason.loggedOut
-            console.log(
-                "Conexão falhou", lastDisconnect.error, "Tentando reconectar", shouldreconnect
-            )
-            if(shouldreconnect){
-                // Se a desconexão não foi por logout, tenta reconectar.
-                connectwhatsapp()
-            }
-        }else if(connection == "open"){
+            console.log("Conexão falhou", lastDisconnect.error, "Tentando reconectar", shouldreconnect)
+            if(shouldreconnect){ connectwhatsapp() }
+        } else if(connection == "open"){
             console.log("Conexão bem sucedida")
         }
-        if(qr){
-            qrcode.generate(qr, {small:true})
-        }
+        if(qr){ qrcode.generate(qr, {small:true}) }
     })
 
-    // Evento "messages.upsert": é acionado sempre que uma nova mensagem é recebida.
     sock.ev.on("messages.upsert", async({ messages }) => {
-        // Pega a primeira mensagem do array (geralmente vem apenas uma).
         const msg = messages[0]
-        // Ignora mensagens sem conteúdo ou enviadas pelo próprio bot.
         if(!msg.message || msg.key.fromMe) return
 
-        // Extrai o ID do usuário (JID) e ignora mensagens de grupo.
-        const jid = msg.key.remoteJid!
-        if (jid.endsWith('@g.us')) return // Ignorar grupos
+        // Adicionado o ! para garantir que não é null
+        const jid = msg.key.remoteJid! 
 
-        // Extrai o nome do contato e o texto da mensagem.
+        if (jid.endsWith('@g.us')) return
+
         const nomeContato = msg.pushName || "Desconhecido"
+        
         let textmessage = ""
+        if (msg.message.conversation) textmessage = msg.message.conversation;
+        else if (msg.message.extendedTextMessage?.text) textmessage = msg.message.extendedTextMessage.text;
+        else return; 
 
-        if (msg.message.conversation) {
-            textmessage = msg.message.conversation;
-        } else if (msg.message.extendedTextMessage?.text) {
-            textmessage = msg.message.extendedTextMessage.text;
-        } else {
-            return; // Outros tipos ignorados neste exemplo
-        }
-
-        /**
-         * Função auxiliar para enviar uma mensagem de resposta ao usuário.
-         * @param texto O texto a ser enviado.
-         * @param jid O ID do destinatário.
-         */
-        const enviar = (texto: string, jid: string) => {
-            return sock.sendMessage(jid, { text: texto }, { quoted: msg })
-        }
-
-        /**
-         * Função principal que processa a mensagem recebida e controla a lógica do menu.
-         * @param jid ID do usuário.
-         * @param texto Mensagem recebida.
-         * @param nomeContato Nome do contato do WhatsApp.
-         */
-        async function processarMensagem(jid: string, texto: string, nomeContato: string) {
-            // Obtém o estado atual do usuário ou define "menu_principal" como padrão.
-            let estadoAtual = userState.get(jid) || "menu_principal";
-            const msg = texto.toLowerCase().trim();
-
-            // Comando global para retornar ao menu principal a qualquer momento.
-            if (msg === "menu") {
-                await enviar(menuPrincipal(nomeContato), jid);
-                userState.set(jid, "menu_principal");
-                return;
-            }
-
-            // Expressão regular para validar o formato de data (dd/mm/aaaa).
-            const regexData = /^\d{2}\/\d{2}\/\d{4}$/;
-
-            switch (estadoAtual) {
-                case "menu_principal":
-                    switch (msg) {
-                        case "1":
-                            await enviar(subMenuRelatorios, jid);
-                            userState.set(jid, "relatorios");
-                            break;
-                        case "2":
-                            await enviar("Opção 2 em desenvolvimento.", jid);
-                            break;
-                        case "3":
-                            await enviar("Dúvidas sobre nossos serviços? Envie sua pergunta.", jid);
-                            userState.set(jid, "duvidas_servicos");
-                            break;
-                        default:
-                            await enviar("Opção inválida, por favor digite uma opção válida.", jid);
-                            break;
-                    }
-                    break;
-
-                // Estado que lida com as opções do submenu "Relatórios".
-                case "relatorios":
-                    switch (msg) {
-                        case "1":
-                            await enviar(relatoriosPassados, jid);
-                            userState.set(jid, "relatorios_passados");
-                            break;
-                        case "2":
-                            await enviar(relatoriosFuturos, jid);
-                            userState.set(jid, "relatorios_futuros");
-                            break;
-                        case "3":
-                            await enviar(definirPeriodo, jid);
-                            userState.set(jid, "definir_periodo_inicial");
-                            break;
-                        case "0":
-                            await enviar(menuPrincipal(nomeContato), jid);
-                            userState.set(jid, "menu_principal");
-                            break;
-                        default:
-                            await enviar("Opção inválida, por favor digite uma opção válida.", jid);
-                            break;
-                    }
-                    break;
-
-                // Estado que lida com as opções de "Relatórios passados".
-                case "relatorios_passados":
-                    if (["1", "2", "3"].includes(msg)) {
-                        await enviar(`Você escolheu relatórios passados para ${msg} dias.`, jid);
-                        // Aqui você pode chamar a função para gerar relatório
-                    } else if (msg === "0") {
-                        await enviar(subMenuRelatorios, jid);
-                        userState.set(jid, "relatorios");
-                    } else {
-                        await enviar("Opção inválida, por favor digite uma opção válida.", jid);
-                    }
-                    break;
-
-                // Estado que lida com as opções de "Relatórios futuros".
-                case "relatorios_futuros":
-                    if (["1", "2", "3"].includes(msg)) {
-                        await enviar(`Você escolheu relatórios futuros para ${msg} dias.`, jid);
-                        // Função para gerar relatório
-                    } else if (msg === "0") {
-                        await enviar(subMenuRelatorios, jid);
-                        userState.set(jid, "relatorios");
-                    } else {
-                        await enviar("Opção inválida, por favor digite uma opção válida.", jid);
-                    }
-                    break;
-
-                // Estado para receber a pergunta do usuário sobre dúvidas.
-                case "duvidas_servicos":
-                    await enviar("Recebemos sua dúvida. Para voltar ao menu digite 'menu'.", jid);
-                    break;
-
-                // Estado que aguarda a data inicial para definir um período.
-                case "definir_periodo_inicial":
-                    if (msg === "0") {
-                        userState.delete(jid + "_data_inicial"); // Limpa o dado temporário
-                        await enviar(subMenuRelatorios, jid);
-                        userState.set(jid, "relatorios");
-                    } else if (regexData.test(msg)) {
-                        userState.set(jid + "_data_inicial", msg);
-                        userState.set(jid, "definir_periodo_final");
-                        await enviar("Agora, qual a data final?\nFormato: dd/mm/aaaa", jid);
-                    } else {
-                        await enviar("Formato de data inválido. Por favor, envie no formato dd/mm/aaaa.", jid);
-                    }
-                    break;
-
-                // Estado que aguarda a data final após a data inicial ter sido fornecida.
-                case "definir_periodo_final":
-                    if (msg === "0") {
-                        userState.delete(jid + "_data_inicial"); // Limpa o dado temporário
-                        await enviar(subMenuRelatorios, jid);
-                        userState.set(jid, "relatorios");
-                    } else if (regexData.test(msg)) {
-                        const dataInicial = userState.get(jid + "_data_inicial");
-                        userState.delete(jid + "_data_inicial");
-                        // Retorna ao menu principal após a conclusão.
-                        userState.set(jid, "menu_principal");
-                        await enviar(`Período definido de ${dataInicial} a ${msg}.`, jid);
-                        // Aqui você pode buscar os dados para o período definido
-                    } else {
-                        await enviar("Formato de data inválido. Por favor, envie no formato dd/mm/aaaa.", jid);
-                    }
-                    break;
-
-                // Caso padrão: se o estado for desconhecido, retorna ao menu principal.
-                default:
-                    await enviar(menuPrincipal(nomeContato), jid);
-                    userState.set(jid, "menu_principal");
-                    break;
-            }
-        }
-
-        // Chama a função de processamento para a mensagem recebida.
-        await processarMensagem(jid, textmessage, nomeContato);
-
+        await processarMensagem(textmessage, jid, nomeContato, msg);
     })
 
-    // Evento "creds.update": salva as credenciais sempre que são atualizadas.
     sock.ev.on("creds.update", saveCreds)
 }
 
-// Inicia a conexão do bot.
 connectwhatsapp()
