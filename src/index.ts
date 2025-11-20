@@ -48,45 +48,39 @@ async function connectwhatsapp() {
 
         const jid = msg.key.remoteJid!;
 
-        // 1. Filtro de Grupos (Ignora mensagens vindas de grupos)
         if (jid.endsWith('@g.us')) return;
 
         const nomeContato = msg.pushName || "Cliente";
 
-        // 2. Extração do Texto da Mensagem
         let textmessage = "";
         if (msg.message.conversation) {
             textmessage = msg.message.conversation;
         } else if (msg.message.extendedTextMessage?.text) {
             textmessage = msg.message.extendedTextMessage.text;
         } else {
-            // Ignora áudios, stickers, etc. por enquanto
             return;
         }
 
-        // 3. Função Auxiliar 'Enviar'
-        // Criamos ela aqui porque só o 'sock' sabe enviar mensagens, 
-        // mas passamos ela para o outro arquivo usar.
         const enviar = async (texto: string, idDestino: string) => {
             return await sock.sendMessage(idDestino, { text: texto }, { quoted: msg });
         };
 
-        // 4. Injeção de Dependência
-        // Passamos tudo que o arquivo de lógica precisa para trabalhar
         try {
             await processarMensagem(
-                jid,            // Quem mandou
-                textmessage,    // O que mandou
-                nomeContato,    // Nome da pessoa
-                userState,      // A memória do bot
-                enviar          // A ferramenta para responder
+                jid,           
+                textmessage,   
+                nomeContato,   
+                userState,     
+                enviar         
             );
         } catch (error) {
-            console.error("Erro ao processar mensagem:", error);
+            console.error("Erro CRÍTICO ao processar mensagem:", error);
+            // NOVO: Envia desculpas se o código quebrar totalmente
+            await enviar("Desculpe, ocorreu um erro inesperado no sistema. 😔\nPor favor, envie outra mensagem para tentarmos novamente.", jid);
+            userState.delete(jid); // Reseta o usuário
         }
     });
 
-    // --- Atualização de Credenciais ---
     sock.ev.on("creds.update", saveCreds);
 }
 

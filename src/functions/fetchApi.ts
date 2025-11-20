@@ -1,92 +1,192 @@
 import moment from "moment-timezone";
-import "dotenv/config"; // Importante: Carrega as variáveis do .env
+import "dotenv/config"; 
 
-// Verifica se as chaves foram carregadas
-const appKey = process.env.OMIE_APP_KEY;
-const appSecret = process.env.OMIE_APP_SECRET;
+const appKey = process.env.OMIE_APP_KEY || "";
+const appSecret = process.env.OMIE_APP_SECRET || "";
 
 if (!appKey || !appSecret) {
-    throw new Error("ERRO DE CONFIGURAÇÃO: Chaves da OMIE não encontradas no arquivo .env");
+    throw new Error("ERRO CRÍTICO: Chaves não configuradas no .env");
 }
 
-// Função renomeada para ser mais descritiva e exportada para uso no bot
-export async function buscarRelatorioOmie(dias: number, tipo: 'passado' | 'futuro') {
-    const urlMov = "https://app.omie.com.br/api/v1/financas/mf/";
-    const urlCat = "https://app.omie.com.br/api/v1/geral/categorias/";
+// Função auxiliar que busca dados SEM FILTRO DE DATA para evitar erro 500
+async function buscarDadosOmie(url: string) {
+    let todosRegistros: any[] = [];
+    let pagina = 1;
+    // Busca até 4 páginas (200 registros) para garantir que pegamos o mês todo
+    const MAX_PAGINAS = 4; 
 
-    // 1. Calcular Datas
-    const hoje = moment().tz("America/Sao_Paulo");
-    let dataInicial, dataFinal;
-
-    if (tipo === 'passado') {
-        dataFinal = hoje.format("DD/MM/YYYY");
-        dataInicial = hoje.clone().subtract(dias, 'days').format("DD/MM/YYYY");
-    } else {
-        dataInicial = hoje.format("DD/MM/YYYY");
-        dataFinal = hoje.clone().add(dias, 'days').format("DD/MM/YYYY");
-    }
-
-    // 2. Montar Corpo da Requisição (Usando as chaves seguras)
-    const bodyMov = {
-        call: "ListarMovimentos",
-        app_key: appKey,
-        app_secret: appSecret,
-        param: [{ 
-            nPagina: 1, 
-            nRegPorPagina: 20, 
-            dDtPagamentoDe: dataInicial, 
-            dDtPagamentoAte: dataFinal,
-            cExibirCategorias: "S" 
-        }] 
-    };
-
-    const bodyCat = {
-        call: "ListarCategorias",
-        app_key: appKey,
-        app_secret: appSecret,
-        param: [{ pagina: 1, registros_por_pagina: 500 }]
-    };
+    const callMethod = url.includes("contapagar") ? "ListarContasPagar" : "ListarContasReceber";
 
     try {
-        // 3. Chamada Paralela
-        const [resMov, resCat] = await Promise.all([
-            fetch(urlMov, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(bodyMov) }),
-            fetch(urlCat, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(bodyCat) }),
-        ]);
-
-        if (!resMov.ok || !resCat.ok) throw new Error("Erro na resposta da API Omie");
-
-        const [dadosMov, dadosCat] = await Promise.all([resMov.json(), resCat.json()]);
-
-        // @ts-ignore
-        if (!dadosMov.movimentos || dadosMov.movimentos.length === 0) {
-            return `🚫 Nenhum movimento encontrado entre ${dataInicial} e ${dataFinal}.`;
-        }
-
-        // 4. Mapear Categorias
-        const mapaCategorias = new Map();
-        // @ts-ignore
-        dadosCat.categoria_cadastro.forEach((cat: any) => mapaCategorias.set(cat.codigo, cat.descricao));
-
-        // 5. Formatar Resposta
-        let mensagem = `📊 *Relatório Financeiro (${tipo === 'passado' ? 'Últimos' : 'Próximos'} ${dias} dias)*\n\n`;
-        let total = 0;
-
-        // @ts-ignore
-        dadosMov.movimentos.forEach((mov: any) => {
-            const valor = mov.resumo.nValPago || mov.detalhes.nValorTitulo;
-            const catNome = mapaCategorias.get(mov.detalhes.cCodCateg) || "Sem Categoria";
-            const data = mov.detalhes.dDtPagamento || mov.detalhes.dDtPrevisao;
+        do {
+            console.log(`   ↳ ${callMethod}: Baixando página ${pagina}...`);
             
-            total += parseFloat(String(valor));
-            mensagem += `📅 ${data} | 💰 R$ ${valor.toFixed(2)}\n📂 ${catNome}\n────────────────\n`;
-        });
+            // 🚨 AQUI ESTÁ O SEGREDO:
+            // Removemos as tags de data (data_venc_ini, etc) daqui.
+            // Mandamos apenas paginação. Assim a Omie NÃO TEM COMO dar erro de tag.
+            const body = {
+                call: callMethod,
+                app_key: appKey,
+                app_secret: appSecret,
+                param: [{
+                    pagina: pagina,
+                    registros_por_pagina: 50,
+                    apenas_importado_api: "N"
+                }]
+            };
 
-        mensagem += `\n✅ *Total:* R$ ${total.toFixed(2)}`;
-        return mensagem;
+            const res = await fetch(url, { 
+                method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) 
+            });
 
-    } catch (error) {
-        console.error("Erro API:", error);
-        return "❌ Erro ao consultar dados financeiros.";
+            if (!res.ok) {
+                console.log(`⚠️ Página ${pagina} falhou ou acabou.`);
+                break;
+            }
+            
+            const dados = await res.json();
+            
+            // @ts-ignore
+            if (dados.faultstring) {
+                // @ts-ignore
+                console.error(`❌ Erro Omie: ${dados.faultstring}`);
+                break;
+            }
+
+            // @ts-ignore
+            const lista = url.includes("contapagar") ? dados.conta_pagar_cadastro : dados.conta_receber_cadastro;
+            
+            if (lista && lista.length > 0) {
+                todosRegistros = todosRegistros.concat(lista);
+            } else {
+                break;
+            }
+
+            // @ts-ignore
+            const totalPgs = dados.total_de_paginas || 1;
+            if (pagina >= totalPgs) break;
+
+            pagina++;
+
+        } while (pagina <= MAX_PAGINAS);
+
+        return todosRegistros;
+
+    } catch (erro) {
+        console.error(`❌ Erro técnico em ${callMethod}:`, erro);
+        return [];
     }
+}
+
+export async function buscarRelatorioOmie(
+    dias: number, 
+    tipo: 'passado' | 'futuro', 
+    datasPersonalizadas?: { inicio: string, fim: string }
+) {
+    
+    // 1. DEFINIR O PERÍODO (Para filtrar aqui no código)
+    let inicioMoment, fimMoment;
+    let dataInicialStr, dataFinalStr;
+
+    if (datasPersonalizadas) {
+        inicioMoment = moment(datasPersonalizadas.inicio, "DD/MM/YYYY");
+        fimMoment = moment(datasPersonalizadas.fim, "DD/MM/YYYY");
+        dataInicialStr = datasPersonalizadas.inicio;
+        dataFinalStr = datasPersonalizadas.fim;
+    } else {
+        const hoje = moment().tz("America/Sao_Paulo");
+        if (tipo === 'passado') {
+            fimMoment = hoje.clone();
+            inicioMoment = hoje.clone().subtract(dias, 'days');
+        } else {
+            inicioMoment = hoje.clone();
+            fimMoment = hoje.clone().add(dias, 'days');
+        }
+        dataInicialStr = inicioMoment.format("DD/MM/YYYY");
+        dataFinalStr = fimMoment.format("DD/MM/YYYY");
+    }
+
+    console.log(`\n🚀 [API] Processando: ${dataInicialStr} a ${dataFinalStr}`);
+
+    const urlPagar = "https://app.omie.com.br/api/v1/financas/contapagar/";
+    const urlReceber = "https://app.omie.com.br/api/v1/financas/contareceber/";
+    
+    // 2. BUSCA BRUTA
+    const [contasPagar, contasReceber] = await Promise.all([
+        buscarDadosOmie(urlPagar),
+        buscarDadosOmie(urlReceber)
+    ]);
+
+    console.log(`📦 Total bruto baixado: ${contasPagar.length} pagar, ${contasReceber.length} receber`);
+
+    // 3. FILTRAGEM INTELIGENTE (LOCAL)
+    // Aqui nós usamos sua lógica de data, mas sem depender da Omie aceitar a tag
+    const filtrarPorPeriodo = (lista: any[]) => {
+        return lista.filter(item => {
+            const dataVenc = item.data_vencimento;
+            if (!dataVenc) return false;
+            const mData = moment(dataVenc, "DD/MM/YYYY");
+            return mData.isBetween(inicioMoment, fimMoment, 'day', '[]');
+        });
+    };
+
+    const pagarFiltrado = filtrarPorPeriodo(contasPagar);
+    const receberFiltrado = filtrarPorPeriodo(contasReceber);
+
+    const totalFiltrado = pagarFiltrado.length + receberFiltrado.length;
+    console.log(`✅ Filtrados no período: ${totalFiltrado}`);
+
+    if (totalFiltrado === 0) {
+        return "⚠️ Não foram encontrados lançamentos com vencimento neste período.";
+    }
+
+    // 4. CÁLCULOS
+    let receitas = 0;
+    let custos = 0;
+    let despesas = 0;
+    let totalEntrada = 0;
+    let totalSaida = 0;
+
+    const somar = (item: any, ehEntrada: boolean) => {
+        let valor = parseFloat(String(item.valor_documento || 0));
+        if (valor === 0) return;
+
+        if (ehEntrada) totalEntrada += valor;
+        else totalSaida += valor;
+
+        const cat = item.codigo_categoria || (item.categorias && item.categorias[0]?.codigo_categoria) || "";
+
+        if (cat.startsWith("1.0")) {
+            if (ehEntrada) receitas += valor;
+            else receitas -= valor;
+        } 
+        else if (cat.startsWith("2.1")) custos += valor;
+        else if (cat.startsWith("3.0") || cat.startsWith("3.1") || cat.startsWith("3.2")) despesas += valor;
+    };
+
+    pagarFiltrado.forEach((i: any) => somar(i, false));
+    receberFiltrado.forEach((i: any) => somar(i, true));
+
+    const resultado = receitas - custos - despesas;
+    const fmt = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    const titulo = datasPersonalizadas ? "Personalizado" : (tipo === 'passado' ? 'Realizado' : 'Previsão');
+
+    let msg = `📊 *Relatório Gerencial (${titulo})*\n`;
+    msg += `📅 ${dataInicialStr} a ${dataFinalStr}\n\n`;
+    
+    msg += `💰 *RESUMO*\n`;
+    msg += `🟢 Recebido: R$ ${fmt(totalEntrada)}\n`;
+    msg += `🔴 Pago: R$ ${fmt(totalSaida)}\n`;
+    msg += `────────────────\n\n`;
+
+    msg += `📋 *DETALHAMENTO*\n`;
+    msg += `(+) Receitas (1.0): R$ ${fmt(receitas)}\n`;
+    msg += `(-) Custos (2.1): R$ ${fmt(custos)}\n`;
+    msg += `(-) Despesas (3.x): R$ ${fmt(despesas)}\n\n`;
+
+    msg += `────────────────\n`;
+    msg += `🏁 *RESULTADO: R$ ${fmt(resultado)}*`;
+
+    return msg;
 }
