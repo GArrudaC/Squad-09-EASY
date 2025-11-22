@@ -1,0 +1,295 @@
+import { buscarRelatorioOmie } from "./functions/fetchApi";
+
+// ==============================================================================
+// TEXTOS DOS MENUS (Versão Final Aprovada)
+// ==============================================================================
+
+const getMenuPrincipal = (nome: string) => {
+    return `👋 Olá, ${nome}! Eu sou Zizy, a atendente virtual da Easy.
+
+Aqui estão nossos serviços disponíveis:
+
+1. Relatórios
+2. Em desenvolvimento
+3. Dúvidas sobre o atendimento a Zizy.
+
+Por favor, envie o número da opção desejada.
+Caso deseje retornar ao menu principal digite “menu“ a qualquer momento!`;
+};
+
+const subMenuRelatorios = `Você escolheu a opção 1, Relatórios. O que você deseja?
+
+1. Relatórios passados
+2. Relatórios futuros
+3. Definir Período
+0. Voltar ao menu anterior`;
+
+const relatoriosPassadosTxt = `Você escolheu a opção 1, Relatórios passados. O que você deseja?
+
+1. 7 dias
+2. 15 dias
+3. 30 dias
+0. voltar ao menu anterior`;
+
+const relatoriosFuturosTxt = `Você escolheu a opção 2, Relatórios futuros. O que você deseja?
+
+1. 7 dias
+2. 15 dias
+3. 30 dias
+0. voltar ao menu anterior`;
+
+const definirPeriodoInicial = `Você escolheu a opção 3, Definir período.
+
+Qual a data inicial?
+Colocar no formato (dd/mm/aaaa)
+
+0. Voltar ao menu anterior`;
+
+const definirPeriodoFinal = `Qual a data final?
+Colocar no formato (dd/mm/aaaa)
+
+0. Voltar ao menu anterior`;
+
+const subMenuDesenvolvimento = `Você escolheu a opção 2, {Em desenvolvimento}.
+O que você deseja?
+
+1. 
+2. 
+3. 
+
+0. Voltar ao menu anterior`;
+
+const textoDuvidas = `Você escolheu a opção 3, Dúvidas sobre o atendimento a Zizy.
+
+Aqui vai uma breve explicação do que nos podemos fazer juntos:
+
+👉 Para ver Relatórios Passados:
+Acesse a opção 1 (Relatórios) > 1 (Passados) e escolha entre 7, 15 ou 30 dias.
+
+👉 Para ver Relatórios Futuros:
+Acesse a opção 1 (Relatórios) > 2 (Futuros) e escolha o período de previsão.
+
+👉 Datas Personalizadas:
+Se nossas opções não te atenderem, você consegue solicitar um relatório com data personalizada na opção "Definir Período"!
+
+Se quiser voltar ao menu e reiniciar o nosso processo é só escrever "menu".`;
+
+// Mensagem para quando der erro ou não tiver dados (sem mandar o menu depois)
+const msgErroReset = "Por favor, envie outra mensagem para começar novamente.";
+
+
+// ==============================================================================
+// LÓGICA PRINCIPAL
+// ==============================================================================
+
+export async function processarMensagem(
+    jid: string, 
+    msgRaw: string, 
+    nomeContato: string, 
+    userState: Map<string, string>, 
+    enviar: (texto: string, jid: string) => Promise<any>
+) {
+    
+    const msg = msgRaw.toLowerCase().trim();
+    const regexData = /^\d{2}\/\d{2}\/\d{4}$/;
+
+    // 1. Verificação de Estado Inicial
+    if (!userState.has(jid)) {
+        await enviar(getMenuPrincipal(nomeContato), jid);
+        userState.set(jid, "menu_principal");
+        return;
+    }
+
+    let estadoAtual = userState.get(jid);
+
+    // 2. Saída de Emergência Global
+    if (msg === "menu") {
+        await enviar(getMenuPrincipal(nomeContato), jid);
+        userState.set(jid, "menu_principal");
+        userState.delete(jid + "_data_inicial"); // Limpa cache de data
+        return;
+    }
+
+    // 3. Máquina de Estados
+    switch (estadoAtual) {
+        
+        // --- MENU PRINCIPAL ---
+        case "menu_principal":
+            switch (msg) {
+                case "1": // Relatórios
+                    await enviar(subMenuRelatorios, jid);
+                    userState.set(jid, "relatorios");
+                    break;
+                
+                case "2": // Em desenvolvimento
+                    await enviar(subMenuDesenvolvimento, jid);
+                    userState.set(jid, "menu_desenvolvimento");
+                    break;
+                
+                case "3": // Dúvidas
+                    await enviar(textoDuvidas, jid);
+                    // Mantemos no menu principal para facilitar a navegação
+                    userState.set(jid, "menu_principal"); 
+                    break;
+                
+                default:
+                    await enviar("❌ Opção inválida. Digite 1, 2 ou 3.", jid);
+                    break;
+            }
+            break;
+
+        // --- SUBMENU RELATÓRIOS ---
+        case "relatorios":
+            switch (msg) {
+                case "1":
+                    await enviar(relatoriosPassadosTxt, jid);
+                    userState.set(jid, "relatorios_passados");
+                    break;
+                case "2":
+                    await enviar(relatoriosFuturosTxt, jid);
+                    userState.set(jid, "relatorios_futuros");
+                    break;
+                case "3":
+                    await enviar(definirPeriodoInicial, jid);
+                    userState.set(jid, "definir_periodo_inicial");
+                    break;
+                case "0":
+                    await enviar(getMenuPrincipal(nomeContato), jid);
+                    userState.set(jid, "menu_principal");
+                    break;
+                default:
+                    await enviar("❌ Opção inválida.", jid);
+                    break;
+            }
+            break;
+
+        // --- SUBMENU EM DESENVOLVIMENTO ---
+        case "menu_desenvolvimento":
+            switch (msg) {
+                case "1":
+                case "2":
+                case "3":
+                    await enviar("🚧 Opção vazia (Em desenvolvimento).", jid);
+                    break;
+                case "0": // Voltar
+                    await enviar(getMenuPrincipal(nomeContato), jid);
+                    userState.set(jid, "menu_principal");
+                    break;
+                default:
+                    await enviar("❌ Opção inválida.", jid);
+                    break;
+            }
+            break;
+
+        // --- RELATÓRIOS PASSADOS ---
+        case "relatorios_passados":
+            if (["1", "2", "3"].includes(msg)) {
+                const dias = msg === "1" ? 7 : msg === "2" ? 15 : 30;
+                await enviar(`⏳ Buscando dados passados de ${dias} dias na Omie...`, jid);
+                
+                // Chama a API
+                const resultado = await buscarRelatorioOmie(dias, 'passado');
+                
+                // LÓGICA CORRIGIDA:
+                // Se começar com ❌ (Erro) ou ⚠️ (Vazio), manda msg e NÃO manda menu.
+                if (resultado.startsWith("❌") || resultado.startsWith("⚠️")) {
+                    await enviar(resultado, jid);
+                    await enviar(msgErroReset, jid);
+                    userState.delete(jid); // Reseta o usuário
+                } else {
+                    // Sucesso: Manda o relatório e o menu para continuar
+                    await enviar(resultado, jid);
+                    userState.set(jid, "menu_principal"); 
+                    await enviar(getMenuPrincipal(nomeContato), jid);
+                }
+
+            } else if (msg === "0") {
+                await enviar(subMenuRelatorios, jid);
+                userState.set(jid, "relatorios");
+            } else {
+                await enviar("❌ Opção inválida.", jid);
+            }
+            break;
+
+        // --- RELATÓRIOS FUTUROS ---
+        case "relatorios_futuros":
+            if (["1", "2", "3"].includes(msg)) {
+                const dias = msg === "1" ? 7 : msg === "2" ? 15 : 30;
+                await enviar(`⏳ Buscando previsão futura de ${dias} dias na Omie...`, jid);
+                
+                const resultado = await buscarRelatorioOmie(dias, 'futuro');
+                
+                if (resultado.startsWith("❌") || resultado.startsWith("⚠️")) {
+                    await enviar(resultado, jid);
+                    await enviar(msgErroReset, jid);
+                    userState.delete(jid);
+                } else {
+                    await enviar(resultado, jid);
+                    userState.set(jid, "menu_principal");
+                    await enviar(getMenuPrincipal(nomeContato), jid);
+                }
+
+            } else if (msg === "0") {
+                await enviar(subMenuRelatorios, jid);
+                userState.set(jid, "relatorios");
+            } else {
+                await enviar("❌ Opção inválida.", jid);
+            }
+            break;
+
+        // --- DEFINIÇÃO DE PERÍODO (INICIAL) ---
+        case "definir_periodo_inicial":
+             if (msg === "0") {
+                userState.delete(jid + "_data_inicial");
+                await enviar(subMenuRelatorios, jid);
+                userState.set(jid, "relatorios");
+            } else if (regexData.test(msg)) {
+                userState.set(jid + "_data_inicial", msg);
+                userState.set(jid, "definir_periodo_final");
+                // Envia o texto da segunda etapa
+                await enviar(definirPeriodoFinal, jid);
+            } else {
+                await enviar("⚠️ Formato inválido. Coloque no formato (dd/mm/aaaa).", jid);
+            }
+            break;
+
+        // --- DEFINIÇÃO DE PERÍODO (FINAL) ---
+        case "definir_periodo_final":
+            if (msg === "0") {
+                userState.delete(jid + "_data_inicial");
+                await enviar(subMenuRelatorios, jid);
+                userState.set(jid, "relatorios");
+            } else if (regexData.test(msg)) {
+                const dataInicial = userState.get(jid + "_data_inicial");
+                const dataFinal = msg; 
+                
+                userState.delete(jid + "_data_inicial"); 
+                
+                await enviar(`⏳ Buscando dados personalizados de ${dataInicial} até ${dataFinal}...`, jid);
+                
+                // Chama API com datas customizadas
+                // @ts-ignore
+                const resultado = await buscarRelatorioOmie(0, 'passado', { inicio: dataInicial, fim: dataFinal });
+                
+                if (resultado.startsWith("❌") || resultado.startsWith("⚠️")) {
+                    await enviar(resultado, jid);
+                    await enviar(msgErroReset, jid);
+                    userState.delete(jid);
+                } else {
+                    await enviar(resultado, jid);
+                    userState.set(jid, "menu_principal");
+                    await enviar(getMenuPrincipal(nomeContato), jid);
+                }
+
+            } else {
+                await enviar("⚠️ Formato inválido. Coloque no formato (dd/mm/aaaa).", jid);
+            }
+            break;
+
+        default:
+            // Se algo sair do controle, manda pro menu
+            await enviar(getMenuPrincipal(nomeContato), jid);
+            userState.set(jid, "menu_principal");
+            break;
+    }
+}
