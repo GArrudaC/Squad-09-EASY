@@ -154,7 +154,7 @@ export async function processarMensagem(
         case "relatorios_passados":
             if (["1", "2", "3"].includes(msg)) {
                 const dias = msg === "1" ? 7 : msg === "2" ? 15 : 30;
-                await enviar(`⏳ Buscando dados passados de ${dias} dias na Omie...`, jid);
+                await enviar(`⏳ Buscando dados passados de ${dias} dias na Easy...`, jid);
                 
                 const resultado = await buscarRelatorioOmie(dias, 'passado');
                 
@@ -181,7 +181,7 @@ export async function processarMensagem(
         case "relatorios_futuros":
             if (["1", "2", "3"].includes(msg)) {
                 const dias = msg === "1" ? 7 : msg === "2" ? 15 : 30;
-                await enviar(`⏳ Buscando previsão futura de ${dias} dias na Omie...`, jid);
+                await enviar(`⏳ Buscando previsão futura de ${dias} dias na Easy...`, jid);
                 
                 const resultado = await buscarRelatorioOmie(dias, 'futuro');
                 
@@ -205,7 +205,7 @@ export async function processarMensagem(
 
         // --- DEFINIÇÃO DE PERÍODO (INICIAL) ---
         case "definir_periodo_inicial":
-             if (msg === "0") {
+            if (msg === "0") {
                 userState.delete(jid + "_data_inicial");
                 await enviar(subMenuRelatorios, jid);
                 userState.set(jid, "relatorios");
