@@ -1,64 +1,49 @@
-# 💬 Banco de Dados — Chatbot Fiscal
+# 🤖 Zizy - Assistente Virtual Financeiro (WhatsApp)
 
-Este arquivo contém o **banco de dados do projeto Chatbot Fiscal**, desenvolvido pelo Squad 09 (EASY).  
-O banco foi criado no **PostgreSQL** e serve para armazenar informações de usuários, atendentes, FAQs e mensagens trocadas entre o chatbot e os clientes.
+> **Projeto:** SQUAD-09-EASY  
+> **Status:** ✅ Funcional / Em Produção
 
----
-
-## 🧠 Estrutura do Banco
-
-- **usuarios** → armazena dados dos clientes (nome, e-mail, data de criação)  
-- **atendentes** → guarda dados dos atendentes humanos (nome, e-mail, cargo)  
-- **faq** → perguntas e respostas frequentes que o chatbot usa  
-- **conversas** → registros de conversas entre usuários e chatbot  
-- **mensagens** → mensagens trocadas dentro de cada conversa  
+Este projeto é um **Chatbot de WhatsApp** desenvolvido em Node.js e TypeScript, projetado para atuar como uma interface conversacional para o ERP **Omie**. Ele permite que gestores e usuários autorizados consultem relatórios de fluxo de caixa, contas a pagar e receber de forma rápida e segura.
 
 ---
 
-## ⚙️ Como Restaurar no PgAdmin
+## 🚀 Funcionalidades Principais
 
-1. Abra o **pgAdmin** e conecte-se ao seu servidor PostgreSQL.  
-2. Clique com o botão direito em **Databases** → **Create → Database...**  
-   - Nome: `chatbot_fiscal`
-3. Após criado, clique com o botão direito no banco `chatbot_fiscal` → **Restore...**
-4. Em “Filename”, selecione o arquivo:  
+* **🔐 Autenticação Segura via Banco de Dados:**
+    * O bot possui um sistema de *Allowlist*. Apenas números de WhatsApp cadastrados previamente na tabela `usuarios` do banco MySQL têm permissão para interagir.
+    * Bloqueio automático de usuários não autorizados.
 
+* **📊 Relatórios Gerenciais Automatizados:**
+    * **Relatório Realizado (Passado):** Consolida entradas e saídas efetivamente pagas/recebidas.
+    * **Relatório de Previsão (Futuro):** Projeta o fluxo de caixa com base nos vencimentos em aberto.
+    * **Período Personalizado:** Permite ao usuário definir qualquer intervalo de datas para análise.
 
+* **🧮 Inteligência Financeira (DRE Simplificado):**
+    * O bot não apenas lista dados, ele calcula indicadores:
+        * (+) Receitas Operacionais
+        * (-) Custos Variáveis
+        * (-) Despesas Fixas
+        * **(=) Resultado Operacional**
 
+* **🔄 Navegação Fluida:** Sistema de menus intuitivo com tratamento de erros e reconexão automática.
 
+---
 
+## 🛠️ Tecnologias Utilizadas
 
+* **Linguagem:** [TypeScript](https://www.typescriptlang.org/)
+* **Runtime:** [Node.js](https://nodejs.org/) (v18+)
+* **WhatsApp API:** [@whiskeysockets/baileys](https://github.com/WhiskeySockets/Baileys)
+* **Banco de Dados:** [MySQL](https://www.mysql.com/) (Driver `mysql2`)
+* **Integração:** API ERP Omie
+* **Utilitários:** `dotenv` (Segurança), `moment-timezone` (Datas).
 
+---
 
+## ⚙️ Pré-requisitos
 
+Para rodar este projeto, você precisa ter instalado:
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+1.  **Node.js** e **npm**.
+2.  **Servidor MySQL** rodando localmente ou na nuvem.
+3.  Credenciais de API da **Omie** (`APP_KEY` e `APP_SECRET`).
