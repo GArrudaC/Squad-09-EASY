@@ -147,25 +147,25 @@ export async function buscarRelatorioOmie(
     let totalEntrada = 0;
     let totalSaida = 0;
 
-    const somar = (item: any, ehEntrada: boolean) => {
-        let valor = parseFloat(String(item.valor_documento || 0));
+    // Processa as ENTRADAS (Contas a Receber)
+    receberFiltrado.forEach((item: any) => {
+        const valor = parseFloat(String(item.valor_documento || 0));
+        if (valor === 0) return;
+        
+        totalEntrada += valor;
+        receitas += valor; // Tudo que entra é considerado receita bruta
+    });
+
+    // Processa as SAÍDAS (Contas a Pagar)
+    pagarFiltrado.forEach((item: any) => {
+        const valor = parseFloat(String(item.valor_documento || 0));
         if (valor === 0) return;
 
-        if (ehEntrada) totalEntrada += valor;
-        else totalSaida += valor;
-
+        totalSaida += valor;
         const cat = item.codigo_categoria || (item.categorias && item.categorias[0]?.codigo_categoria) || "";
-
-        if (cat.startsWith("1.0")) {
-            if (ehEntrada) receitas += valor;
-            else receitas -= valor;
-        } 
-        else if (cat.startsWith("2.1")) custos += valor;
-        else if (cat.startsWith("3.0") || cat.startsWith("3.1") || cat.startsWith("3.2")) despesas += valor;
-    };
-
-    pagarFiltrado.forEach((i: any) => somar(i, false));
-    receberFiltrado.forEach((i: any) => somar(i, true));
+        if (cat.startsWith("2.1")) custos += valor;
+        else despesas += valor; // Se não for custo, consideramos como despesa
+    });
 
     const resultado = receitas - custos - despesas;
     const fmt = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
