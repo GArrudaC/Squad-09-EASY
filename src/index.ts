@@ -4,8 +4,10 @@ import { Boom } from "@hapi/boom";
 import qrcode from "qrcode-terminal";
 import { pino } from "pino";
 
-// IMPORTANTE: Importamos a lógica do arquivo vizinho
+// Importamos a lógica do menu
 import { processarMensagem } from "./processarMensagens";
+// Importamos o serviço de autenticação (NOVO)
+import { autenticarUsuario } from "./functions/authService";
 
 async function connectwhatsapp() {
     const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
@@ -16,12 +18,8 @@ async function connectwhatsapp() {
         logger: pino({ level: "silent" })
     });
 
-    // ===================================================================
-    //      ARMAZENAMENTO DE ESTADO (MEMÓRIA DO BOT)
-    // ===================================================================
     const userState = new Map<string, string>();
 
-    // --- Monitoramento da Conexão ---
     sock.ev.on("connection.update", (update) => {
         const { connection, lastDisconnect, qr } = update;
 
@@ -40,7 +38,6 @@ async function connectwhatsapp() {
         }
     });
 
-    // --- Recebimento de Mensagens ---
     sock.ev.on("messages.upsert", async ({ messages }) => {
         const msg = messages[0];
 
@@ -50,7 +47,32 @@ async function connectwhatsapp() {
 
         if (jid.endsWith('@g.us')) return;
 
-        const nomeContato = msg.pushName || "Cliente";
+        // ============================================================
+        // 🛡️ ÁREA DE SEGURANÇA (AUTENTICAÇÃO)
+        // ============================================================
+        
+        // Verifica no banco se esse número tem permissão
+        const usuario = await autenticarUsuario(jid);
+
+        const enviar = async (texto: string, idDestino: string) => {
+            return await sock.sendMessage(idDestino, { text: texto }, { quoted: msg });
+        };
+
+        // Se usuario for null, ele não está no banco.
+        if (!usuario) {
+            console.log(`🚫 Acesso negado para: ${jid}`);
+            // Opcional: Avisar que ele não tem cadastro ou apenas ignorar.
+            // Vou deixar avisando para teste, depois você pode comentar essa linha.
+            await enviar("🚫 *Acesso Negado.*\nSeu número não está cadastrado em nosso sistema.", jid);
+            return; // PARA AQUI. Não executa o resto.
+        }
+
+        // Se chegou aqui, está logado!
+        // Podemos usar o nome real do banco de dados agora!
+        const nomeReal = usuario.nome; 
+        console.log(`✅ Mensagem de: ${nomeReal} (${usuario.nome_empresa})`);
+
+        // ============================================================
 
         let textmessage = "";
         if (msg.message.conversation) {
@@ -61,23 +83,18 @@ async function connectwhatsapp() {
             return;
         }
 
-        const enviar = async (texto: string, idDestino: string) => {
-            return await sock.sendMessage(idDestino, { text: texto }, { quoted: msg });
-        };
-
         try {
             await processarMensagem(
                 jid,           
                 textmessage,   
-                nomeContato,   
+                nomeReal,      // Passamos o nome do banco em vez do nome do WhatsApp
                 userState,     
                 enviar         
             );
         } catch (error) {
             console.error("Erro CRÍTICO ao processar mensagem:", error);
-            // NOVO: Envia desculpas se o código quebrar totalmente
-            await enviar("Desculpe, ocorreu um erro inesperado no sistema. 😔\nPor favor, envie outra mensagem para tentarmos novamente.", jid);
-            userState.delete(jid); // Reseta o usuário
+            await enviar("Desculpe, ocorreu um erro inesperado no sistema. 😔", jid);
+            userState.delete(jid);
         }
     });
 
