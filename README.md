@@ -71,13 +71,6 @@ Crie um arquivo chamado `.env` na raiz do projeto (copie o conteúdo abaixo).
 # Credenciais da API Omie (Pegue no Painel do Desenvolvedor Omie)
 OMIE_APP_KEY=sua_app_key_aqui
 OMIE_APP_SECRET=seu_app_secret_aqui
-
-# Configuração do Banco de Dados MySQL
-DB_HOST=localhost
-DB_USER=root
-DB_PASSWORD=sua_senha_do_banco
-DB_NAME=chatbot_fiscal
-DB_PORT=3306
 ```
 
 ### 4. Configurar o Banco de Dados
